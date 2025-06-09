@@ -10,7 +10,6 @@ import torch
 from torch import Tensor
 
 
-
 def run_linear(
     d_in: int,
     d_out: int,
@@ -25,12 +24,23 @@ def run_linear(
         out_dim (int): The size of the output dimension
         weights (Float[Tensor, "d_out d_in"]): The linear weights to use
         in_features (Float[Tensor, "... d_in"]): The output tensor to apply the function to
-    
+
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
+    # 导入你的Linear模块
+    from cs336_basics.transformer.Linear import Linear
 
-    raise NotImplementedError
+    # 创建Linear模块实例
+    linear = Linear(d_in, d_out, device=weights.device, dtype=weights.dtype)
+
+    # 使用load_state_dict加载权重
+    linear.weight.data = weights
+    print(weights.shape)
+    print(in_features.shape)
+
+    # 执行前向传播
+    return linear(in_features)
 
 
 def run_embedding(
@@ -47,12 +57,21 @@ def run_embedding(
         d_model (int): The size of the embedding dimension
         weights (Float[Tensor, "vocab_size d_model"]): The embedding vectors to fetch from
         token_ids (Int[Tensor, "..."]): The set of token ids to fetch from the Embedding layer
-    
+
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
+    from cs336_basics.transformer.Embedding import Embedding
 
-    raise NotImplementedError
+    # 创建Linear模块实例
+    embedding = Embedding(vocab_size, d_model, device="cuda", dtype=torch.float32)
+
+    # 使用load_state_dict加载权重
+    embedding.weight.data = weights
+    print(weights.shape)
+
+    # 执行前向传播
+    return embedding(token_ids)
 
 
 def run_swiglu(
@@ -84,6 +103,17 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
+    from cs336_basics.transformer.FFN import SwiGLU
+
+    # 创建Linear模块实例
+    swiglu = SwiGLU(d_model, d_ff)
+    # 使用load_state_dict加载权重
+    swiglu.w1.weight.data = w1_weight
+    swiglu.w2.weight.data = w2_weight
+    swiglu.w3.weight.data = w3_weight
+    # 执行前向传播
+    return swiglu(in_features)
+
     raise NotImplementedError
 
 
@@ -105,6 +135,12 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
+    from cs336_basics.transformer.transformer import ScaledDotProductAttention
+
+    # 创建Linear模块实例
+    sdpa = ScaledDotProductAttention()
+    return sdpa(Q, K, V, mask)
+
     raise NotImplementedError
 
 
@@ -201,7 +237,43 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer.rope import RotaryEmbedding
+    import torch
+
+    rope = RotaryEmbedding(
+        theta=10000.0, d_k=d_k, max_seq_len=max_seq_len, device="cuda"
+    )
+    return rope(in_query_or_key, token_positions)
+    # 预计算频率张量
+    freqs_cis = precompute_freqs_cis(d_k, max_seq_len, theta)
+
+    # 确保 token_positions 在正确的设备上
+    if freqs_cis.device != token_positions.device:
+        freqs_cis = freqs_cis.to(token_positions.device)
+
+    # 根据 token_positions 获取对应的 freqs_cis
+    # 将 token_positions 展平以便索引
+    flat_positions = token_positions.reshape(-1)
+    # 获取对应位置的 freqs_cis
+    freqs_cis_pos = freqs_cis[flat_positions]
+    # 恢复原始形状
+    freqs_cis_pos = freqs_cis_pos.reshape(*token_positions.shape, -1)
+
+    # 将输入张量分为实部和虚部（偶数和奇数索引）
+    x_re, x_im = in_query_or_key[..., ::2], in_query_or_key[..., 1::2]
+
+    # 将 freqs_cis 分为实部和虚部
+    freqs_cos = torch.cos(torch.angle(freqs_cis_pos))
+    freqs_sin = torch.sin(torch.angle(freqs_cis_pos))
+
+    # 应用旋转操作
+    # x_out[..., ::2] = x_re * cos - x_im * sin
+    # x_out[..., 1::2] = x_re * sin + x_im * cos
+    x_out = torch.zeros_like(in_query_or_key)
+    x_out[..., ::2] = x_re * freqs_cos - x_im * freqs_sin
+    x_out[..., 1::2] = x_re * freqs_sin + x_im * freqs_cos
+
+    return x_out
 
 
 def run_transformer_block(
@@ -302,7 +374,7 @@ def run_transformer_lm(
             evenly divisible by `num_heads`.
         d_ff (int): Dimensionality of the feed-forward inner layer (section 3.3).
         rope_theta (float): The RoPE $\Theta$ parameter.
-        weights (dict[str, Tensor]): 
+        weights (dict[str, Tensor]):
             State dict of our reference implementation. {num_layers} refers to an
             integer between `0` and `num_layers - 1` (the layer index).
             The keys of this dictionary are:
@@ -379,7 +451,12 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer.RMSNorm import RMSNorm
+
+    rmsnorm = RMSNorm(d_model, eps)
+    # weights is gain
+    rmsnorm.gain.data = weights
+    return rmsnorm(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -393,7 +470,11 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+
+    def SiLU(x: torch.Tensor) -> torch.Tensor:
+        return x / (1 + torch.e ** (-x))
+
+    return SiLU(in_features)
 
 
 def run_get_batch(
@@ -432,10 +513,15 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    max_vals = torch.max(in_features, dim=dim, keepdim=True).values
+    sum_tensor = torch.sum(torch.exp(in_features - max_vals), dim=dim)
+    # 使用torch的除法运算直接在tensor上进行操作，避免Python列表推导式
+    return torch.exp(in_features - max_vals) / sum_tensor.unsqueeze(-1)
 
 
-def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
+def run_cross_entropy(
+    inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]
+) -> Float[Tensor, ""]:
     """Given a tensor of inputs and targets, compute the average cross-entropy
     loss across examples.
 
@@ -451,7 +537,9 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     raise NotImplementedError
 
 
-def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
+def run_gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter], max_l2_norm: float
+) -> None:
     """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
 
     Args:
