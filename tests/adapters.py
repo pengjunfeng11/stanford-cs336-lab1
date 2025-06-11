@@ -167,7 +167,7 @@ def run_multihead_self_attention(
         max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
         q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
         k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
+        v_proj_weight (Float[Tensor, "d_v d_in"]): Weights for the V projection
         o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
         in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
 
@@ -175,7 +175,14 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer.transformer import CausalMultiHeadSelfAttention
+
+    cmhsa = CausalMultiHeadSelfAttention(d_model, num_heads)
+    cmhsa.q_proj.weight.data = q_proj_weight
+    cmhsa.k_proj.weight.data = k_proj_weight
+    cmhsa.v_proj.weight.data = v_proj_weight
+    cmhsa.o_proj.weight.data = o_proj_weight
+    return cmhsa(in_features)
 
 
 def run_multihead_self_attention_with_rope(
