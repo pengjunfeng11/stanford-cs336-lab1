@@ -1,3 +1,5 @@
+# Here is the lab1 implementation code for the CS336 2025 course
+
 # CS336 Spring 2025 Assignment 1: Basics
 
 For a full description of the assignment, see the assignment handout at
