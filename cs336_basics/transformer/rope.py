@@ -38,7 +38,7 @@ class RotaryEmbedding(nn.Module):
     def forward(
         self,
         x: torch.Tensor,  # batch_size, seq_len, dim
-        token_positions: Int[torch.Tensor, " ... sequence_length"],
+        token_positions: Int[torch.Tensor, " ... sequence_length"] = -1,
     ) -> torch.Tensor:
         """Process an input tensor of shape (..., seq_len, d_k) and return a tensor
         of the same shape.
@@ -47,7 +47,6 @@ class RotaryEmbedding(nn.Module):
         of shape (..., seq_len) specifying the token positions of x along the sequence
         dimension. You should use the token positions to slice your (possibly precomputed)
         cos and sin tensors along the sequence dimension."""
-        assert len(x.shape) == 3
         freqs_cis = self.precompute_freqs_cis(self.d_k, x.shape[1])
 
         # 将token_positions展平成一维张量,方便后续索引操作 （实际上本来就是）

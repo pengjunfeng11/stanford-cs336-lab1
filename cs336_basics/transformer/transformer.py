@@ -6,6 +6,9 @@ sys.path.append(
 )
 from Linear import Linear
 from util import softmax
+from rope import RotaryEmbedding
+from RMSNorm import RMSNorm
+from FFN import SwiGLU
 
 
 class ScaledDotProductAttention(torch.nn.Module):
@@ -36,61 +39,103 @@ class ScaledDotProductAttention(torch.nn.Module):
 
 
 class CausalMultiHeadSelfAttention(torch.nn.Module):
-    def __init__(self, d_model, n_heads):
-        # dk = dv = d_model/n_heads
+    def __init__(
+        self, d_model, n_heads, max_len=None, theta=None, token_positions=None
+    ):
         super(CausalMultiHeadSelfAttention, self).__init__()
+        self.token_positions = token_positions
         self.d_model = d_model
         self.n_heads = n_heads
-        d_k = d_v = d_model // n_heads
-        # As a stretch goal, try combining the key, query, and value projections into a single weight matrix so you only need a single matrix multiply.
-        self.q_proj = Linear(d_model, d_k * n_heads)
-        self.k_proj = Linear(d_model, d_k * n_heads)
-        self.v_proj = Linear(d_model, d_v * n_heads)
-        self.o_proj = Linear(d_model, d_v)
+        self.d_k = d_model // n_heads
+
+        self.q_proj = Linear(d_model, d_model)
+        self.k_proj = Linear(d_model, d_model)
+        self.v_proj = Linear(d_model, d_model)
+        self.o_proj = Linear(d_model, d_model)  # 修复：输出维度应该是d_model
         self.attn = ScaledDotProductAttention()
+        self.rope = RotaryEmbedding(theta, self.d_k, max_len)
 
-    def forward(
-        self,
-        in_features: torch.Tensor,
-    ):
-        """
-        Given the key, query, and value projection weights of a naive unbatched
-        implementation of multi-head attention, return the output of an optimized batched
-        implementation. This implementation should handle the key, query, and value projections
-        for all heads in a single matrix multiply.
-        This function should not use RoPE.
-        See section 3.2.2 of Vaswani et al., 2017.
+    def forward(self, in_features: torch.Tensor, token_positions=None):
+        batch_size, seq_len, d_model = in_features.shape
 
-        Args:
-            d_model (int): Dimensionality of the feedforward input and output.
-            num_heads (int): Number of heads to use in multi-headed attention.
-            max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-            q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
-            k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-            v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
-            o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
-            in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
-
-        Returns:
-            Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
-            implementation with the given QKV projection weights and input features.
-        """
+        # 投影Q、K、V
         Q = self.q_proj(in_features)
         K = self.k_proj(in_features)
         V = self.v_proj(in_features)
-        # 获取序列长度
-        seq_len = in_features.size(1)
 
-        # 创建下三角矩阵作为mask
-        # 使用torch.triu创建上三角矩阵，然后取反得到下三角矩阵
+        # 重塑为多头格式: [batch, seq_len, n_heads, d_k]
+        Q = Q.contiguous().view(batch_size, seq_len, self.n_heads, self.d_k)
+        K = K.contiguous().view(batch_size, seq_len, self.n_heads, self.d_k)
+        V = V.contiguous().view(batch_size, seq_len, self.n_heads, self.d_k)
+
+        # 在重塑后应用RoPE到Q和K（此时维度是正确的d_k）
+        # 需要对每个头分别应用RoPE
+        for head in range(self.n_heads):
+            Q[:, :, head, :] = self.rope(Q[:, :, head, :], self.token_positions)
+            K[:, :, head, :] = self.rope(K[:, :, head, :], self.token_positions)
+
+        # 转置为: [batch, n_heads, seq_len, d_k]
+        Q = Q.transpose(1, 2)
+        K = K.transpose(1, 2)
+        V = V.transpose(1, 2)
+
+        # 创建因果mask
         mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool()
-        mask = ~mask
+        mask = ~mask  # 下三角为True
+        mask = mask.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, seq_len]
+        mask = mask.expand(batch_size, self.n_heads, -1, -1)
 
-        # 扩展mask维度以匹配注意力的形状
-        mask = mask.unsqueeze(0)  # 添加batch维度
-        mask = mask.expand(in_features.size(0), -1, -1)  # 扩展到所有batch
-        self.attn(Q, K, V, mask)
-        O = self.o_proj(self.attn(Q, K, V, mask))
-        return O
+        # 计算注意力（只调用一次）
+        attn_output = self.attn(Q, K, V, mask)
 
-        pass
+        # 转置回来并合并头: [batch, seq_len, n_heads, d_k]
+        attn_output = attn_output.transpose(1, 2)
+
+        # 重塑为: [batch, seq_len, d_model]
+        # contiguous()确保张量在内存中是连续的，这样可以提高view操作的效率
+        # 在某些情况下(如转置操作后)，张量在内存中可能不连续，contiguous()可以解决这个问题
+        attn_output = attn_output.contiguous().view(batch_size, seq_len, d_model)
+
+        # 输出投影
+        output = self.o_proj(attn_output)
+
+        return output
+
+
+class TransformerBlock(torch.nn.Module):
+    def __init__(
+        self,
+        d_model,
+        n_heads,
+        d_ff,
+        max_seq_len,
+        theta,
+    ):
+        super(TransformerBlock, self).__init__()
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_ff = d_ff
+        self.attn = CausalMultiHeadSelfAttention(d_model, n_heads, max_seq_len, theta)
+        self.ln1 = RMSNorm(d_model)
+        self.ln2 = RMSNorm(d_model)
+        self.ffn = SwiGLU(d_model, d_ff)
+
+    def forward(self, in_features):
+        # 获取序列长度并创建位置编码
+        seq_len = in_features.shape[-2]
+        positions = torch.arange(seq_len, device=in_features.device)
+
+        # 更新注意力机制的token_positions
+        self.attn.token_positions = positions
+
+        # Pre-LN Transformer结构：先LayerNorm，再注意力，最后残差连接
+        ln1_output = self.ln1(in_features)
+        attn_output = self.attn(ln1_output)
+        # 第一个残差连接
+        residual1 = in_features + attn_output
+
+        # 第二个残差连接：先LayerNorm，再FFN，最后残差连接
+        ln2_output = self.ln2(residual1)
+        ffn_output = self.ffn(ln2_output)
+        # 第二个残差连接
+        return residual1 + ffn_output

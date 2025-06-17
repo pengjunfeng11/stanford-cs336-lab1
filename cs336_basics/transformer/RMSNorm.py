@@ -45,37 +45,3 @@ class RMSNorm(nn.Module):
         # output = normalized_x * self.gain
 
         # return output
-
-
-def test_rms_norm():
-    # 创建一个RMSNorm实例
-    d_model = 4
-    rms_norm = RMSNorm(d_model)
-
-    # 创建测试输入张量
-    batch_size = 2
-    seq_len = 3
-    x = torch.tensor(
-        [
-            # batch 1
-            torch.randn(512, 1024),  # 生成第一个batch的随机向量序列
-            # batch 2
-            torch.randn(512, 1024),  # 生成第二个batch的随机向量序列
-        ]
-    )
-
-    # 执行RMSNorm
-    output = rms_norm(x)
-
-    # 验证输出形状是否正确
-    assert output.shape == (
-        batch_size,
-        seq_len,
-        d_model,
-    ), f"输出形状错误: 期望 {(batch_size, seq_len, d_model)}, 得到 {output.shape}"
-
-    print("RMSNorm测试通过！")
-
-
-if __name__ == "__main__":
-    test_rms_norm()

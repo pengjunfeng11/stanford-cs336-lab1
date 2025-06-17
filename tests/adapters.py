@@ -222,6 +222,17 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
+
+    from cs336_basics.transformer.transformer import CausalMultiHeadSelfAttention
+
+    cmhsa = CausalMultiHeadSelfAttention(
+        d_model, num_heads, max_seq_len, theta, token_positions
+    )
+    cmhsa.q_proj.weight.data = q_proj_weight
+    cmhsa.k_proj.weight.data = k_proj_weight
+    cmhsa.v_proj.weight.data = v_proj_weight
+    cmhsa.o_proj.weight.data = o_proj_weight
+    return cmhsa(in_features)
     raise NotImplementedError
 
 
@@ -251,36 +262,6 @@ def run_rope(
         theta=10000.0, d_k=d_k, max_seq_len=max_seq_len, device="cuda"
     )
     return rope(in_query_or_key, token_positions)
-    # 预计算频率张量
-    freqs_cis = precompute_freqs_cis(d_k, max_seq_len, theta)
-
-    # 确保 token_positions 在正确的设备上
-    if freqs_cis.device != token_positions.device:
-        freqs_cis = freqs_cis.to(token_positions.device)
-
-    # 根据 token_positions 获取对应的 freqs_cis
-    # 将 token_positions 展平以便索引
-    flat_positions = token_positions.reshape(-1)
-    # 获取对应位置的 freqs_cis
-    freqs_cis_pos = freqs_cis[flat_positions]
-    # 恢复原始形状
-    freqs_cis_pos = freqs_cis_pos.reshape(*token_positions.shape, -1)
-
-    # 将输入张量分为实部和虚部（偶数和奇数索引）
-    x_re, x_im = in_query_or_key[..., ::2], in_query_or_key[..., 1::2]
-
-    # 将 freqs_cis 分为实部和虚部
-    freqs_cos = torch.cos(torch.angle(freqs_cis_pos))
-    freqs_sin = torch.sin(torch.angle(freqs_cis_pos))
-
-    # 应用旋转操作
-    # x_out[..., ::2] = x_re * cos - x_im * sin
-    # x_out[..., 1::2] = x_re * sin + x_im * cos
-    x_out = torch.zeros_like(in_query_or_key)
-    x_out[..., ::2] = x_re * freqs_cos - x_im * freqs_sin
-    x_out[..., 1::2] = x_re * freqs_sin + x_im * freqs_cos
-
-    return x_out
 
 
 def run_transformer_block(
@@ -353,6 +334,19 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
+    from cs336_basics.transformer.transformer import TransformerBlock
+
+    tb = TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
+    tb.attn.q_proj.weight.data = weights["attn.q_proj.weight"]
+    tb.attn.k_proj.weight.data = weights["attn.k_proj.weight"]
+    tb.attn.v_proj.weight.data = weights["attn.v_proj.weight"]
+    tb.attn.o_proj.weight.data = weights["attn.output_proj.weight"]
+    tb.ln1.data = weights["ln1.weight"]
+    tb.ffn.w1.weight.data = weights["ffn.w1.weight"]
+    tb.ffn.w2.weight.data = weights["ffn.w2.weight"]
+    tb.ffn.w3.weight.data = weights["ffn.w3.weight"]
+    tb.ln2.data = weights["ln2.weight"]
+    return tb(in_features)
     raise NotImplementedError
 
 
