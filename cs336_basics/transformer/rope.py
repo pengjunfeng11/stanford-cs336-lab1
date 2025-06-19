@@ -47,28 +47,35 @@ class RotaryEmbedding(nn.Module):
         of shape (..., seq_len) specifying the token positions of x along the sequence
         dimension. You should use the token positions to slice your (possibly precomputed)
         cos and sin tensors along the sequence dimension."""
-        freqs_cis = self.precompute_freqs_cis(self.d_k, x.shape[1])
-
-        # 将token_positions展平成一维张量,方便后续索引操作 （实际上本来就是）
+        
+        # 使用预计算的freqs_cis而不是重新计算
+        freqs_cis = self.freqs_cis
+    
+        # 将token_positions展平成一维张量,方便后续索引操作
         flat_positions = token_positions.reshape(-1)
-
+    
+        # 确保索引不超出范围
+        max_pos = torch.max(flat_positions)
+        if max_pos >= freqs_cis.shape[0]:
+            raise ValueError(f"Token position {max_pos} exceeds maximum sequence length {freqs_cis.shape[0]-1}")
+    
         # 根据展平后的位置索引从预计算的freqs_cis中获取对应位置的旋转编码
-        # （本质上来说，这两个长度是相同的。即freqs_cis_pos = freqs_cis）
         freqs_cis_pos = freqs_cis[flat_positions]
-
+    
         # 将获取到的旋转编码重新调整为与token_positions相同的形状,并在最后添加一个维度用于存储编码值
         freqs_cis_pos = freqs_cis_pos.reshape(*token_positions.shape, -1)
+        
         # 将最后一维度拆分为二维向量
         x_re, x_im = x[..., ::2], x[..., 1::2]
-
+    
         # 将 freqs_cis 分为实部和虚部
         freqs_cos = torch.cos(torch.angle(freqs_cis_pos))
         freqs_sin = torch.sin(torch.angle(freqs_cis_pos))
-
+    
         x_out = torch.zeros_like(x)
         # 对偶数位置的元素进行旋转变换: x_re * cos(θ) - x_im * sin(θ)
         x_out[..., ::2] = x_re * freqs_cos - x_im * freqs_sin
         # 对奇数位置的元素进行旋转变换: x_re * sin(θ) + x_im * cos(θ)
         x_out[..., 1::2] = x_re * freqs_sin + x_im * freqs_cos
-
+    
         return x_out

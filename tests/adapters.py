@@ -36,8 +36,6 @@ def run_linear(
 
     # 使用load_state_dict加载权重
     linear.weight.data = weights
-    print(weights.shape)
-    print(in_features.shape)
 
     # 执行前向传播
     return linear(in_features)
@@ -64,7 +62,7 @@ def run_embedding(
     from cs336_basics.transformer.Embedding import Embedding
 
     # 创建Linear模块实例
-    embedding = Embedding(vocab_size, d_model, device="cuda", dtype=torch.float32)
+    embedding = Embedding(vocab_size, d_model, device="cpu", dtype=torch.float32)
 
     # 使用load_state_dict加载权重
     embedding.weight.data = weights
@@ -113,9 +111,6 @@ def run_swiglu(
     swiglu.w3.weight.data = w3_weight
     # 执行前向传播
     return swiglu(in_features)
-
-    raise NotImplementedError
-
 
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
@@ -226,13 +221,13 @@ def run_multihead_self_attention_with_rope(
     from cs336_basics.transformer.transformer import CausalMultiHeadSelfAttention
 
     cmhsa = CausalMultiHeadSelfAttention(
-        d_model, num_heads, max_seq_len, theta, token_positions
+        d_model, num_heads, max_seq_len, theta
     )
     cmhsa.q_proj.weight.data = q_proj_weight
     cmhsa.k_proj.weight.data = k_proj_weight
     cmhsa.v_proj.weight.data = v_proj_weight
     cmhsa.o_proj.weight.data = o_proj_weight
-    return cmhsa(in_features)
+    return cmhsa(in_features, token_positions)
     raise NotImplementedError
 
 
@@ -346,8 +341,52 @@ def run_transformer_block(
     tb.ffn.w2.weight.data = weights["ffn.w2.weight"]
     tb.ffn.w3.weight.data = weights["ffn.w3.weight"]
     tb.ln2.data = weights["ln2.weight"]
-    return tb(in_features)
-    raise NotImplementedError
+    # return tb(in_features)
+    # raise NotImplementedError
+
+    # 获取 token 位置
+    batch_size, seq_length, _ = in_features.shape
+    token_positions = torch.arange(seq_length).expand(batch_size, -1)
+    # token_positions = torch.arange(seq_length)
+    
+    # 应用第一个 RMSNorm
+    ln1_weight = weights['ln1.weight']
+    normed_input = run_rmsnorm(d_model, 1e-5, ln1_weight, in_features)
+    
+    # 获取 Q、K、V 投影权重
+    q_proj_weight = weights['attn.q_proj.weight']
+    k_proj_weight = weights['attn.k_proj.weight']
+    v_proj_weight = weights['attn.v_proj.weight']
+    
+    # 运行多头自注意力（带 RoPE）
+    attn_output = run_multihead_self_attention_with_rope(
+        d_model, num_heads, seq_length, theta,
+        q_proj_weight, k_proj_weight, v_proj_weight,
+        weights['attn.output_proj.weight'],
+        normed_input,
+        token_positions
+    )
+    
+    # 第一个残差连接
+    residual = in_features + attn_output
+    
+    # 第二个 RMSNorm
+    ln2_weight = weights['ln2.weight']
+    normed_attn_output = run_rmsnorm(d_model, 1e-5, ln2_weight, residual)
+    
+    # 运行 FFN（SwiGLU）
+    ffn_output = run_swiglu(
+        d_model, d_ff,
+        weights['ffn.w1.weight'],
+        weights['ffn.w2.weight'],
+        weights['ffn.w3.weight'],
+        normed_attn_output
+    )
+    
+    # 第二个残差连接
+    output = residual + ffn_output
+    
+    return output
 
 
 def run_transformer_lm(

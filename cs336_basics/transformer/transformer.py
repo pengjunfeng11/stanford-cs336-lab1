@@ -1,8 +1,11 @@
 import torch
 import sys
 
-sys.path.append(
-    "/mnt/d/WorkSpace/cs336/lab1/assignment1-basics/cs336_basics/transformer/"
+sys.path.extend(
+    [
+    "/mnt/d/WorkSpace/cs336/lab1/assignment1-basics/cs336_basics/transformer/",
+    '/Users/berrypeng/Desktop/workSpace/berry_workSpace/Python/GitHub/stanford-cs336-lab1/cs336_basics/transformer/'
+    ]
 )
 from Linear import Linear
 from util import softmax
@@ -40,10 +43,10 @@ class ScaledDotProductAttention(torch.nn.Module):
 
 class CausalMultiHeadSelfAttention(torch.nn.Module):
     def __init__(
-        self, d_model, n_heads, max_len=None, theta=None, token_positions=None
+        self, d_model, n_heads, max_len=None, theta=None
     ):
         super(CausalMultiHeadSelfAttention, self).__init__()
-        self.token_positions = token_positions
+        # self.token_positions = token_positions
         self.d_model = d_model
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
@@ -55,7 +58,7 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         self.attn = ScaledDotProductAttention()
         self.rope = RotaryEmbedding(theta, self.d_k, max_len)
 
-    def forward(self, in_features: torch.Tensor, token_positions=None):
+    def forward(self, in_features: torch.Tensor, token_positions):
         batch_size, seq_len, d_model = in_features.shape
 
         # 投影Q、K、V
@@ -71,8 +74,8 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         # 在重塑后应用RoPE到Q和K（此时维度是正确的d_k）
         # 需要对每个头分别应用RoPE
         for head in range(self.n_heads):
-            Q[:, :, head, :] = self.rope(Q[:, :, head, :], self.token_positions)
-            K[:, :, head, :] = self.rope(K[:, :, head, :], self.token_positions)
+            Q[:, :, head, :] = self.rope(Q[:, :, head, :], token_positions)
+            K[:, :, head, :] = self.rope(K[:, :, head, :], token_positions)
 
         # 转置为: [batch, n_heads, seq_len, d_k]
         Q = Q.transpose(1, 2)
@@ -122,15 +125,15 @@ class TransformerBlock(torch.nn.Module):
 
     def forward(self, in_features):
         # 获取序列长度并创建位置编码
-        seq_len = in_features.shape[-2]
-        positions = torch.arange(seq_len, device=in_features.device)
+        batch_size, seq_len, d_model = in_features.shape
+        positions = torch.arange(seq_len).expand(batch_size, -1)
 
         # 更新注意力机制的token_positions
-        self.attn.token_positions = positions
+        # self.attn.token_positions = positions
 
         # Pre-LN Transformer结构：先LayerNorm，再注意力，最后残差连接
         ln1_output = self.ln1(in_features)
-        attn_output = self.attn(ln1_output)
+        attn_output = self.attn(ln1_output, positions)
         # 第一个残差连接
         residual1 = in_features + attn_output
 

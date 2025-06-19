@@ -2,16 +2,15 @@ import torch
 import torch.nn as nn
 import sys
 
-sys.path.append(
-    "/mnt/d/WorkSpace/cs336/lab1/assignment1-basics/cs336_basics/transformer/"
+sys.path.extend(
+    [
+    "/mnt/d/WorkSpace/cs336/lab1/assignment1-basics/cs336_basics/transformer/",
+    '/Users/berrypeng/Desktop/workSpace/berry_workSpace/Python/GitHub/stanford-cs336-lab1/cs336_basics/transformer/'
+    ]
 )
 
-from Linear import Linear
 from util import SiLU
 
-
-def SiLU(x: torch.Tensor) -> torch.Tensor:
-    return x / (1 + torch.e ** (-x))
 
 
 class SwiGLU(nn.Module):
