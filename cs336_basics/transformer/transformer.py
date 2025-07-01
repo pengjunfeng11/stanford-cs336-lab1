@@ -3,8 +3,8 @@ import sys
 
 sys.path.extend(
     [
-    "/mnt/d/WorkSpace/cs336/lab1/assignment1-basics/cs336_basics/transformer/",
-    '/Users/berrypeng/Desktop/workSpace/berry_workSpace/Python/GitHub/stanford-cs336-lab1/cs336_basics/transformer/'
+        "/mnt/d/WorkSpace/cs336/lab1/assignment1-basics/cs336_basics/transformer/",
+        "/Users/berrypeng/Desktop/workSpace/berry_workSpace/Python/GitHub/stanford-cs336-lab1/cs336_basics/transformer/",
     ]
 )
 from Linear import Linear
@@ -12,6 +12,7 @@ from util import softmax
 from rope import RotaryEmbedding
 from RMSNorm import RMSNorm
 from FFN import SwiGLU
+from Embedding import Embedding
 
 
 class ScaledDotProductAttention(torch.nn.Module):
@@ -42,9 +43,7 @@ class ScaledDotProductAttention(torch.nn.Module):
 
 
 class CausalMultiHeadSelfAttention(torch.nn.Module):
-    def __init__(
-        self, d_model, n_heads, max_len=None, theta=None
-    ):
+    def __init__(self, d_model, n_heads, max_len=None, theta=None):
         super(CausalMultiHeadSelfAttention, self).__init__()
         # self.token_positions = token_positions
         self.d_model = d_model
@@ -142,3 +141,70 @@ class TransformerBlock(torch.nn.Module):
         ffn_output = self.ffn(ln2_output)
         # 第二个残差连接
         return residual1 + ffn_output
+
+
+class TransformerLM(torch.nn.Module):
+    """完整的Transformer语言模型"""
+    
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+    ):
+        super(TransformerLM, self).__init__()
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.d_model = d_model
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.rope_theta = rope_theta
+        
+        # Token embeddings
+        self.token_embeddings = Embedding(vocab_size, d_model)
+        
+        # Transformer layers
+        self.layers = torch.nn.ModuleList([
+            TransformerBlock(
+                d_model=d_model,
+                n_heads=num_heads,
+                d_ff=d_ff,
+                max_seq_len=context_length,
+                theta=rope_theta
+            )
+            for _ in range(num_layers)
+        ])
+        
+        # Final layer norm
+        self.ln_final = RMSNorm(d_model)
+        
+        # Language model head (output projection to vocabulary)
+        self.lm_head = Linear(d_model, vocab_size)
+    
+    def forward(self, in_indices: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            in_indices: Token indices of shape (batch_size, sequence_length)
+            
+        Returns:
+            Logits of shape (batch_size, sequence_length, vocab_size)
+        """
+        # Token embedding
+        x = self.token_embeddings(in_indices)  # (batch_size, seq_len, d_model)
+        
+        # Pass through transformer layers
+        for layer in self.layers:
+            x = layer(x)
+        
+        # Final layer norm
+        x = self.ln_final(x)
+        
+        # Language model head
+        logits = self.lm_head(x)  # (batch_size, seq_len, vocab_size)
+        
+        return logits

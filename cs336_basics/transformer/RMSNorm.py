@@ -17,6 +17,13 @@ class RMSNorm(nn.Module):
 
         input:
         """
+        x1 = x
+        square = x**2
+        mean = torch.mean(square, dim=-1, keepdim=True)
+        rms = torch.sqrt(mean + self.eps)
+        return x1 / rms * self.gain
+
+        # 这两段代码因该完全等效，无非是效率的差别。但很奇怪，会有实际的误差。他们都能通过rsmNorm的测试，但在进行transformer block的测试时，下面的代码会不通过
 
         def rms_norm_single(tensor):
             # tensor.shape: (d_model,)

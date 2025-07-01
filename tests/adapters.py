@@ -112,6 +112,7 @@ def run_swiglu(
     # 执行前向传播
     return swiglu(in_features)
 
+
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
     K: Float[Tensor, " ... keys d_k"],
@@ -220,9 +221,7 @@ def run_multihead_self_attention_with_rope(
 
     from cs336_basics.transformer.transformer import CausalMultiHeadSelfAttention
 
-    cmhsa = CausalMultiHeadSelfAttention(
-        d_model, num_heads, max_seq_len, theta
-    )
+    cmhsa = CausalMultiHeadSelfAttention(d_model, num_heads, max_seq_len, theta)
     cmhsa.q_proj.weight.data = q_proj_weight
     cmhsa.k_proj.weight.data = k_proj_weight
     cmhsa.v_proj.weight.data = v_proj_weight
@@ -236,7 +235,7 @@ def run_rope(
     theta: float,
     max_seq_len: int,
     in_query_or_key: Float[Tensor, " ... sequence_length d_k"],
-    token_positions: Int[Tensor, " ... sequence_length"],
+    token_positions: Int[Tensor, "... sequence_length"],
 ) -> Float[Tensor, " ... sequence_length d_k"]:
     """
     Run RoPE for a given input tensor.
@@ -348,44 +347,50 @@ def run_transformer_block(
     batch_size, seq_length, _ = in_features.shape
     token_positions = torch.arange(seq_length).expand(batch_size, -1)
     # token_positions = torch.arange(seq_length)
-    
+
     # 应用第一个 RMSNorm
-    ln1_weight = weights['ln1.weight']
+    ln1_weight = weights["ln1.weight"]
     normed_input = run_rmsnorm(d_model, 1e-5, ln1_weight, in_features)
-    
+
     # 获取 Q、K、V 投影权重
-    q_proj_weight = weights['attn.q_proj.weight']
-    k_proj_weight = weights['attn.k_proj.weight']
-    v_proj_weight = weights['attn.v_proj.weight']
-    
+    q_proj_weight = weights["attn.q_proj.weight"]
+    k_proj_weight = weights["attn.k_proj.weight"]
+    v_proj_weight = weights["attn.v_proj.weight"]
+
     # 运行多头自注意力（带 RoPE）
     attn_output = run_multihead_self_attention_with_rope(
-        d_model, num_heads, seq_length, theta,
-        q_proj_weight, k_proj_weight, v_proj_weight,
-        weights['attn.output_proj.weight'],
+        d_model,
+        num_heads,
+        seq_length,
+        theta,
+        q_proj_weight,
+        k_proj_weight,
+        v_proj_weight,
+        weights["attn.output_proj.weight"],
         normed_input,
-        token_positions
+        token_positions,
     )
-    
+
     # 第一个残差连接
     residual = in_features + attn_output
-    
+
     # 第二个 RMSNorm
-    ln2_weight = weights['ln2.weight']
+    ln2_weight = weights["ln2.weight"]
     normed_attn_output = run_rmsnorm(d_model, 1e-5, ln2_weight, residual)
-    
+
     # 运行 FFN（SwiGLU）
     ffn_output = run_swiglu(
-        d_model, d_ff,
-        weights['ffn.w1.weight'],
-        weights['ffn.w2.weight'],
-        weights['ffn.w3.weight'],
-        normed_attn_output
+        d_model,
+        d_ff,
+        weights["ffn.w1.weight"],
+        weights["ffn.w2.weight"],
+        weights["ffn.w3.weight"],
+        normed_attn_output,
     )
-    
+
     # 第二个残差连接
     output = residual + ffn_output
-    
+
     return output
 
 
@@ -468,7 +473,65 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer.transformer import TransformerBlock
+    from cs336_basics.transformer.Embedding import Embedding
+    from cs336_basics.transformer.Linear import Linear
+
+    batch_size, seq_len = in_indices.shape
+
+    # 1. Token Embedding
+    x = run_embedding(
+        vocab_size=vocab_size,
+        d_model=d_model,
+        weights=weights["token_embeddings.weight"],
+        token_ids=in_indices,
+    )
+
+    # 2. Pass through transformer layers
+    for layer_idx in range(num_layers):
+        # 获取当前层的权重
+        layer_weights = {
+            "attn.q_proj.weight": weights[f"layers.{layer_idx}.attn.q_proj.weight"],
+            "attn.k_proj.weight": weights[f"layers.{layer_idx}.attn.k_proj.weight"],
+            "attn.v_proj.weight": weights[f"layers.{layer_idx}.attn.v_proj.weight"],
+            "attn.output_proj.weight": weights[
+                f"layers.{layer_idx}.attn.output_proj.weight"
+            ],
+            "ln1.weight": weights[f"layers.{layer_idx}.ln1.weight"],
+            "ffn.w1.weight": weights[f"layers.{layer_idx}.ffn.w1.weight"],
+            "ffn.w2.weight": weights[f"layers.{layer_idx}.ffn.w2.weight"],
+            "ffn.w3.weight": weights[f"layers.{layer_idx}.ffn.w3.weight"],
+            "ln2.weight": weights[f"layers.{layer_idx}.ln2.weight"],
+        }
+
+        # 创建位置编码
+        token_positions = torch.arange(seq_len, device=x.device)
+
+        # 运行transformer block
+        x = run_transformer_block(
+            d_model=d_model,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            max_seq_len=context_length,
+            theta=rope_theta,
+            weights=layer_weights,
+            in_features=x,
+        )
+
+    # 3. Final Layer Norm
+    x = run_rmsnorm(
+        d_model=d_model, eps=1e-5, weights=weights["ln_final.weight"], in_features=x
+    )
+
+    # 4. Language Model Head (Linear projection to vocabulary)
+    # 创建Linear层并设置权重
+    lm_head = Linear(d_model, vocab_size)
+    lm_head.weight.data = weights["lm_head.weight"]
+
+    # 计算最终的logits
+    logits = lm_head(x)  # (batch_size, seq_len, vocab_size)
+
+    return logits
 
 
 def run_rmsnorm(
@@ -574,7 +637,10 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    from cs336_basics.transformer import util
+
+    # return loss
+    return util.cross_entropy_loss(inputs, targets)
 
 
 def run_gradient_clipping(
