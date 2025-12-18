@@ -22,21 +22,24 @@ import torch
 def cross_entropy_loss(inputs, targets):
     from cs336_basics.transformer.util import softmax
 
-    def logSoftmax(inputs: torch.Tensor):
-        sm = softmax(inputs, dim=1)  # 确保 softmax 按行归一化
-        return torch.log(sm)
+    # def logSoftmax(inputs: torch.Tensor):
+    #     sm = softmax(inputs, dim=1)  # 确保 softmax 按行归一化
+    #     return torch.log(sm)
+    
+    def log_softmax(inputs: torch.Tensor):
+        max_val = torch.max(inputs)
+        shift = inputs-max_val
+        return shift - torch.log(torch.sum(torch.exp(shift)))
 
     def MyNLLLoss(x: torch.Tensor, y: torch.Tensor):
         loss = []
         for n in range(len(y)):
-            l_n = -x[n][y[n]]  # 提取第 n 个样本的真实标签对应的对数概率
+            l_n = -log_softmax(x[n])[y[n]]  # 提取第 n 个样本的真实标签对应的对数概率
             loss.append(l_n)
         return torch.mean(torch.stack(loss))  # 使用 PyTorch 的 mean 和 stack
 
-    from torch.nn.functional import softmax, log_softmax
-
     # return loss
-    return MyNLLLoss(log_softmax(inputs), targets)
+    return MyNLLLoss(inputs, targets)
 
 
 def cross_entropy_gradient(y_pred, y_true):
