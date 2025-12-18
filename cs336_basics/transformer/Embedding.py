@@ -24,12 +24,4 @@ class Embedding(nn.Module):
         """
         token_ids: (batch_size, seq_len)
         """
-        res_embedding = torch.zeros(
-            (token_ids.shape[0], token_ids.shape[1], self.d_model),
-            device=self.weight.device,
-        )  # batch_size, seq_len, d_model
-        for batch_idx in range(token_ids.shape[0]):
-            for char_idx, token_id in enumerate(token_ids[batch_idx]):
-                if token_id < self.vocab_size and token_id >= 0:
-                    res_embedding[batch_idx][char_idx] = self.weight[token_id]
-        return res_embedding
+        return self.weight[token_ids]

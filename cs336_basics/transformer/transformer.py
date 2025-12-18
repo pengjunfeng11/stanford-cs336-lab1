@@ -1,18 +1,12 @@
 import torch
-import sys
+import torch.nn as nn
 
-sys.path.extend(
-    [
-        "/mnt/d/WorkSpace/cs336/lab1/assignment1-basics/cs336_basics/transformer/",
-        "/Users/berrypeng/Desktop/workSpace/berry_workSpace/Python/GitHub/stanford-cs336-lab1/cs336_basics/transformer/",
-    ]
-)
-from Linear import Linear
-from util import softmax
-from rope import RotaryEmbedding
-from RMSNorm import RMSNorm
-from FFN import SwiGLU
-from Embedding import Embedding
+from .Linear import Linear
+from .util import softmax
+from .rope import RotaryEmbedding
+from .RMSNorm import RMSNorm
+from .FFN import SwiGLU
+from .Embedding import Embedding
 
 
 class ScaledDotProductAttention(torch.nn.Module):
@@ -53,7 +47,7 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         self.q_proj = Linear(d_model, d_model)
         self.k_proj = Linear(d_model, d_model)
         self.v_proj = Linear(d_model, d_model)
-        self.o_proj = Linear(d_model, d_model)  # 修复：输出维度应该是d_model
+        self.o_proj = Linear(d_model, d_model)
         self.attn = ScaledDotProductAttention()
         self.rope = RotaryEmbedding(theta, self.d_k, max_len)
 
@@ -86,6 +80,7 @@ class CausalMultiHeadSelfAttention(torch.nn.Module):
         mask = ~mask  # 下三角为True
         mask = mask.unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, seq_len]
         mask = mask.expand(batch_size, self.n_heads, -1, -1)
+        mask = mask.to(Q.device) # Ensure mask is on the same device
 
         # 计算注意力（只调用一次）
         attn_output = self.attn(Q, K, V, mask)
@@ -125,7 +120,8 @@ class TransformerBlock(torch.nn.Module):
     def forward(self, in_features):
         # 获取序列长度并创建位置编码
         batch_size, seq_len, d_model = in_features.shape
-        positions = torch.arange(seq_len).expand(batch_size, -1)
+        # Ensure positions are on the same device as input
+        positions = torch.arange(seq_len, device=in_features.device).expand(batch_size, -1)
 
         # 更新注意力机制的token_positions
         # self.attn.token_positions = positions

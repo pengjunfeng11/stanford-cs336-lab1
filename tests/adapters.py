@@ -654,7 +654,26 @@ def run_gradient_clipping(
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    # 将参数转换为列表以便多次遍历
+    param_list = list(parameters)
+
+    # 计算所有参数梯度的总L2范数
+    total_norm = 0.0
+    for param in param_list:
+        if param.grad is not None:
+            # 计算当前参数梯度的L2范数的平方
+            param_norm = param.grad.data.norm(dtype=torch.float32)
+            total_norm += param_norm.item() ** 2
+
+    # 计算总L2范数
+    total_norm = total_norm**0.5
+
+    # 如果总范数超过最大值，则进行裁剪
+    if total_norm > max_l2_norm:
+        clip_coef = max_l2_norm / total_norm
+        for param in param_list:
+            if param.grad is not None:
+                param.grad.data.mul_(clip_coef)
 
 
 def get_adamw_cls() -> type[torch.optim.Optimizer]:
@@ -752,7 +771,9 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    from cs336_basics.bpe import BPETokenizer
+
+    return BPETokenizer(vocab, merges, special_tokens)
 
 
 def run_train_bpe(
@@ -782,4 +803,22 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    import sys
+    import os
+    
+    # 将项目路径添加到sys.path以便导入BPE模块
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    
+    # 导入BPE训练函数
+    from cs336_basics.bpe import train_bpe
+    
+    # 调用训练函数
+    vocab, merges = train_bpe(
+        input_path=input_path,
+        vocab_size=vocab_size,
+        special_tokens=special_tokens,
+    )
+    
+    return vocab, merges

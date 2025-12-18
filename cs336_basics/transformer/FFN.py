@@ -8,9 +8,7 @@ sys.path.extend(
     '/Users/berrypeng/Desktop/workSpace/berry_workSpace/Python/GitHub/stanford-cs336-lab1/cs336_basics/transformer/'
     ]
 )
-
-from util import SiLU
-
+from .util import SiLU
 
 
 class SwiGLU(nn.Module):
